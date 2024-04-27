@@ -103,7 +103,7 @@ int test3(void)
 		wait();
 		printf("Test 3 OK if trap 14 was triggered before this by process with pid: %d\n", pid);
 		printf("... seems to%s be OK\n",
-		       open("/shm_test4", O_RDONLY) >= 0 ? "" : " not");
+		       open("/shm_test3", O_RDONLY) >= 0 ? "" : " not");
 		shm_close(fd);
 		unlink("/shm_test3");
 		return 1;
