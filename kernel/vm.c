@@ -383,3 +383,30 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 	}
 	return 0;
 }
+
+/// SHM FUNKCIJE
+
+int shm_open(char *name){
+
+
+	return 0;
+}
+int shm_trunc(int shm_od, int size){
+
+	return 0;
+}
+int shm_map(int shm_od, void **va, int flags){
+
+	return 0;
+}
+int shm_close(int shm_od){
+
+	return 0;
+}
+
+
+
+
+
+
+
