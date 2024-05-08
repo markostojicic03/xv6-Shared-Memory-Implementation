@@ -4,8 +4,15 @@
 #include "x86.h"
 #include "memlayout.h"
 #include "mmu.h"
-#include "proc.h"
 #include "elf.h"
+#include "proc.h"
+
+#define SHM_SIZE 65
+
+struct shm *shmObj[SHM_SIZE];
+int nshmObj = 0;
+
+
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -384,23 +391,111 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 	return 0;
 }
 
+// ZA STRINGOVE
+int compareShmName(char newName[], char shmObjName[], int indxShm){
+	int i = 0;
+	while(newName[i] != '\0' && shmObjName[i] != '\0'){
+		if(newName[i] != shmObjName[i]){
+			return 0;
+		}
+		i++;
+	}
+	if(newName[i] == '\0' && shmObjName[i] == '\0'){
+		return indxShm;
+	}
+	else return 0;
+}
+
+void copyCharArray(char firstArray[], char secondArray[]){ // ovde cu kopirati elemente drugog niza u prvi niz
+	int j = 0;
+	while(j < strlen(secondArray)){
+		firstArray[j] = secondArray[j];
+		j++;
+	}
+	firstArray[j] = '\0';
+}
+
+
+
+
 /// SHM FUNKCIJE
+int shm_open(void){
 
-int shm_open(char *name){
+	char *name;
+	if(argstr(0, &name) < 0)
+      return -1;
 
 
+	if(myproc()->shmCounter >= 16) return -1;
+
+	int pronadjenShm = 0;
+
+	int i = 1;
+	while(i <= nshmObj){
+		pronadjenShm = compareShmName(name, shmObj[i]->name, i);
+		if(pronadjenShm) break;
+		i++;
+	}
+
+
+	if(pronadjenShm != 0){
+		myproc()->openShm[myproc()->shmCounter] = shmObj[pronadjenShm];
+		myproc()->shmCounter = myproc()->shmCounter + 1;
+		return pronadjenShm;
+	}
+	else{
+		if(nshmObj >= SHM_SIZE) return -1;
+		nshmObj++;
+		struct shm *newShm = (struct shm *)kalloc();
+
+		copyCharArray(newShm->name, name);
+		newShm->sizeShm = 0;
+		shmObj[nshmObj] = newShm;
+
+		myproc()->openShm[myproc()->shmCounter] = shmObj[nshmObj];
+		myproc()->shmCounter = myproc()->shmCounter + 1;
+		return nshmObj;
+	}
+}
+int shm_trunc(void){
+	int shm_od;
+	int size;
+	if(argint(0, &shm_od) < 0 || argint(1, &size) < 0) return -1;
+	if(size < 0 || shmObj[shm_od]->sizeShm != 0 ) return -1;
+	if(shm_od < 1 || shm_od > nshmObj) return -1;
+
+	int straniceIndex = 0;
+	int flagZaOslobadjanjeMemorije = 0;
+	while(size > 0){
+		if(straniceIndex >= 32){
+			flagZaOslobadjanjeMemorije = 1;
+			break;
+		}
+		char *novaStranica = kalloc();
+		if(!novaStranica) return -1;
+		shmObj[shm_od]->stranice[straniceIndex].adresa = novaStranica;
+		size-=4096;
+		shmObj[shm_od]->sizeShm+= 4096;
+
+		straniceIndex++;
+	}
+
+	if(flagZaOslobadjanjeMemorije){
+		for(int i = 0; i < 32;++i){
+			kfree(shmObj[shm_od]->stranice[i].adresa);
+		}
+		shmObj[shm_od]->sizeShm = 0;
+		return -1;
+	}
+
+	return shmObj[shm_od]->sizeShm;
+}
+int shm_map(void){
+	//int shm_od, void **va, int flags
 	return 0;
 }
-int shm_trunc(int shm_od, int size){
-
-	return 0;
-}
-int shm_map(int shm_od, void **va, int flags){
-
-	return 0;
-}
-int shm_close(int shm_od){
-
+int shm_close(void){
+	//int shm_od
 	return 0;
 }
 
