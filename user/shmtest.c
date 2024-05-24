@@ -75,6 +75,7 @@ int test2(void)
 		p[0] = 42;
 		shm_close(fd);
 		wait();
+
 	}
 	else
 	{
@@ -207,6 +208,7 @@ int test6(void)
 	// constant below.
 	const unsigned max_sz = 0x40000000 - step - 1;
 	void* foo;
+	
 	for (unsigned tot_sz = 0; tot_sz < max_sz; tot_sz += step) {
 		int id;
 		if ((id = shm_open("hello")) < 0) {

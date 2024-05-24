@@ -26,6 +26,7 @@ tvinit(void)
 	initlock(&tickslock, "time");
 }
 
+
 void
 idtinit(void)
 {

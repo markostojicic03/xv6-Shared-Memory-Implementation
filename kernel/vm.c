@@ -6,12 +6,14 @@
 #include "mmu.h"
 #include "elf.h"
 #include "proc.h"
+#include "spinlock.h"
+#include "kernel/fcntl.h"
+#include "stddef.h"
 
 #define SHM_SIZE 65
 
-struct shm *shmObj[SHM_SIZE];
+struct shm *shmObj[SHM_SIZE] = {NULL};
 int nshmObj = 0;
-
 
 
 extern char data[];  // defined by kernel.ld
@@ -69,7 +71,6 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 {
 	char *a, *last;
 	pte_t *pte;
-
 	a = (char*)PGROUNDDOWN((uint)va);
 	last = (char*)PGROUNDDOWN(((uint)va) + size - 1);
 	for(;;){
@@ -391,7 +392,7 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 	return 0;
 }
 
-// ZA STRINGOVE
+
 int compareShmName(char newName[], char shmObjName[], int indxShm){
 	int i = 0;
 	while(newName[i] != '\0' && shmObjName[i] != '\0'){
@@ -406,7 +407,7 @@ int compareShmName(char newName[], char shmObjName[], int indxShm){
 	else return 0;
 }
 
-void copyCharArray(char firstArray[], char secondArray[]){ // ovde cu kopirati elemente drugog niza u prvi niz
+void copyCharArray(char firstArray[], char secondArray[]){
 	int j = 0;
 	while(j < strlen(secondArray)){
 		firstArray[j] = secondArray[j];
@@ -418,43 +419,87 @@ void copyCharArray(char firstArray[], char secondArray[]){ // ovde cu kopirati e
 
 
 
-/// SHM FUNKCIJE
+
 int shm_open(void){
-
 	char *name;
-	if(argstr(0, &name) < 0)
-      return -1;
+	struct proc *curproc = myproc();
+	if(argstr(0, &name) < 0){
+		return -1;
+	}
+
+	if(curproc->shmCounter >= 16 || nshmObj > 65) return -1;
 
 
-	if(myproc()->shmCounter >= 16) return -1;
 
 	int pronadjenShm = 0;
 
-	int i = 1;
-	while(i <= nshmObj){
-		pronadjenShm = compareShmName(name, shmObj[i]->name, i);
+	int it = 1;
+	while(it <= nshmObj){
+		pronadjenShm = compareShmName(name, shmObj[it]->name, it);
 		if(pronadjenShm) break;
-		i++;
+		it++;
 	}
 
-
 	if(pronadjenShm != 0){
-		myproc()->openShm[myproc()->shmCounter] = shmObj[pronadjenShm];
-		myproc()->shmCounter = myproc()->shmCounter + 1;
+		int flagDaliJeOtvoren = 0;
+		for(int i = 0; i < 16;i++){
+			if(compareShmName(shmObj[pronadjenShm]->name, curproc->openShm[i]->name, pronadjenShm)){
+				flagDaliJeOtvoren = 1;
+				break;
+			}
+		}
+		if(flagDaliJeOtvoren == 0){
+			
+			shmObj[pronadjenShm]->ref = shmObj[pronadjenShm]->ref + 1;
+			int indxProc = -1;
+			for(int i = 0; i < 16;++i){
+				if(curproc->openShm[i] == NULL){
+					indxProc = i;
+					break;
+				}
+			}
+			if(indxProc == -1) return -1;
+
+			curproc->openShm[indxProc] = shmObj[pronadjenShm];
+			curproc->shmCounter = curproc->shmCounter + 1;
+		}
 		return pronadjenShm;
 	}
 	else{
-		if(nshmObj >= SHM_SIZE) return -1;
-		nshmObj++;
-		struct shm *newShm = (struct shm *)kalloc();
+		int indx = -1;
+		for(int i = 1; i < 65;++i){
+			if(shmObj[i] == NULL){
+				indx = i;
+				break;
+			}
+		}
+	
+		int	indxProc = -1;
+		for(int i = 0; i < 16;++i){
+			if(curproc->openShm[i] == NULL){
+				indxProc = i;
+				break;
+			}
+		}
+		if(indxProc == -1 || indx == -1) return -1;
 
+
+		struct shm *newShm = (struct shm *)kalloc();
+		newShm->id = indx;
 		copyCharArray(newShm->name, name);
 		newShm->sizeShm = 0;
-		shmObj[nshmObj] = newShm;
+		newShm->ref = 1;
+		for(int i = 0; i < 32;++i){
+			newShm->stranice[i].popunjenaStranica = 0;
+		}
 
-		myproc()->openShm[myproc()->shmCounter] = shmObj[nshmObj];
-		myproc()->shmCounter = myproc()->shmCounter + 1;
-		return nshmObj;
+
+		shmObj[indx] = newShm;
+		curproc->openShm[indxProc] = newShm;
+		curproc->shmCounter = curproc->shmCounter + 1;
+		nshmObj++;
+	
+		return indx;
 	}
 }
 int shm_trunc(void){
@@ -466,14 +511,25 @@ int shm_trunc(void){
 
 	int straniceIndex = 0;
 	int flagZaOslobadjanjeMemorije = 0;
+
 	while(size > 0){
 		if(straniceIndex >= 32){
 			flagZaOslobadjanjeMemorije = 1;
 			break;
 		}
 		char *novaStranica = kalloc();
-		if(!novaStranica) return -1;
-		shmObj[shm_od]->stranice[straniceIndex].adresa = novaStranica;
+		if(!novaStranica){
+			flagZaOslobadjanjeMemorije = 1;
+			break;
+		}
+		memset(novaStranica, 0, 4096);
+
+		struct shmStranica *noviStructStranica = (struct shmStranica *)kalloc(); 
+		shmObj[shm_od]->stranice[straniceIndex] = *noviStructStranica; 
+		shmObj[shm_od]->stranice[straniceIndex].phAdresa = novaStranica;
+		kfree((char *)noviStructStranica);
+
+		shmObj[shm_od]->stranice[straniceIndex].popunjenaStranica = 1;
 		size-=4096;
 		shmObj[shm_od]->sizeShm+= 4096;
 
@@ -482,25 +538,173 @@ int shm_trunc(void){
 
 	if(flagZaOslobadjanjeMemorije){
 		for(int i = 0; i < 32;++i){
-			kfree(shmObj[shm_od]->stranice[i].adresa);
+			if(shmObj[shm_od]->stranice[i].popunjenaStranica == 1){
+				kfree(shmObj[shm_od]->stranice[i].phAdresa);
+				shmObj[shm_od]->stranice[i].popunjenaStranica = 0;
+			}
 		}
 		shmObj[shm_od]->sizeShm = 0;
 		return -1;
 	}
-
 	return shmObj[shm_od]->sizeShm;
 }
+
 int shm_map(void){
-	//int shm_od, void **va, int flags
+	int shm_od;
+	void **va;
+	int flags;
+	struct proc *curproc = myproc();
+	if(curproc->fork != 0){
+		shm_od = curproc->tempId;
+		va = curproc->tempPok;
+		flags = curproc->tempFlags;
+		curproc = curproc->child;
+
+	}
+	else if(argint(0, &shm_od) < 0 || argptr(1, (void *)&va, sizeof(void *)) < 0  || argint(2, &flags) < 0 ) return -1;
+	
+
+	struct shm *tempShm = shmObj[shm_od];
+	if(tempShm->sizeShm == 0) return -1;
+
+
+	for(int i = 0; i < curproc->mapCounter;i++){
+		if(curproc->mapiraniShm[i] == shm_od){
+			return -1;
+		}
+	}
+
+
+
+	int sizeShmObj = tempShm->sizeShm;
+	pde_t *pgdir = curproc->pgdir;
+	void *start_address = (void *)(KERNBASE / 2);
+	void *end_address = (void *)KERNBASE;
+	int indxFizickeStranice = 0;
+	int indxVirStranice = 0;
+	int fStart = 0;
+
+	int dozvola = 0;
+	if(flags == O_WRONLY) return -1;
+	else if(flags == O_RDONLY) dozvola = PTE_U;
+	else dozvola = PTE_W|PTE_U;
+
+	myproc()->flagPoseban = flags;
+	for (void *a = start_address; a < end_address; a += PGSIZE) {
+		if(indxFizickeStranice > 31 || tempShm->stranice[indxFizickeStranice].popunjenaStranica == 0 || sizeShmObj <= 0 ) break;
+		sizeShmObj-=4096;
+
+		pte_t *pte = walkpgdir(curproc->pgdir, a, 0); 
+		if (pte == 0 || (*pte & PTE_P) == 0) {
+			if(fStart == 0){
+				fStart = 1;
+				*va = a;
+			}
+			uint pa = V2P(tempShm->stranice[indxFizickeStranice].phAdresa);
+			++indxFizickeStranice;
+			if(mappages(pgdir, a, 4096, pa, dozvola) == 0){
+				curproc->vira[indxVirStranice] = a;
+				++indxVirStranice;
+			}
+			else return -1;
+			
+		} 
+	}
+	for(int i = 0; i < 16;++i){
+		if(curproc->mapiraniShm[i] == 0){
+			curproc->mapiraniShm[i] = shm_od;
+			break;
+		}
+	}
+    curproc->mapCounter = curproc->mapCounter + 1;
+
+
 	return 0;
 }
+
+
 int shm_close(void){
-	//int shm_od
+	struct proc *curproc = myproc();
+	int shm_od;
+	if(curproc->tempId != 0){
+		shm_od = curproc->tempId;	
+		curproc->tempId = 0;
+
+	}
+	else if(argint(0, &shm_od) < 0){
+		 return -1;
+	} 
+
+
+
+	if(shm_od < 1 || shm_od > nshmObj){
+		return -1;
+	}
+		
+	
+    struct shm *removeShm = shmObj[shm_od];
+
+
+	int indexShmUProc = -1;
+	for(int i = 0; i < 16;++i){
+		if(curproc->openShm[i] == NULL) continue;
+		struct shm *trenutniShmProc = curproc->openShm[i];
+		if(compareShmName(removeShm->name, trenutniShmProc->name, shm_od) != 0){
+			indexShmUProc = i;
+			break;
+		}
+	}
+	if(indexShmUProc == -1){
+		return -1;
+	}
+	if(curproc->mapCounter != 0){
+		int pageSize = removeShm->sizeShm / 4096;
+
+		for(int j = 0; j < pageSize;++j){
+			void *a = curproc->vira[j];
+			pte_t *pte;
+			pte = walkpgdir(curproc->pgdir, a, 0);
+			
+			if (pte != 0){
+				*pte = 0;
+				curproc->vira[j] = 0;	
+			}
+		
+		}
+
+		for(int i = 0; i < 16;++i){
+			if(curproc->mapiraniShm[i] == shm_od){
+				curproc->mapiraniShm[i] = 0;
+				curproc->mapCounter = curproc->mapCounter - 1;
+				break;
+			}
+		}
+	} 
+
+	removeShm->ref = removeShm->ref - 1;
+	curproc->openShm[indexShmUProc] = NULL;
+	curproc->shmCounter = curproc->shmCounter - 1;
+
+
+
+	
+
+    if(removeShm->ref == 0) {
+		int pageSize = removeShm->sizeShm / 4096;
+		for(int i = 0; i < pageSize;++i){
+			kfree(removeShm->stranice[i].phAdresa);
+			removeShm->stranice[i].popunjenaStranica = 0;
+		}
+		kfree((char *)removeShm);
+		shmObj[shm_od] = NULL;
+		nshmObj--;
+
+   	 }
+
+
+	
 	return 0;
 }
-
-
-
 
 
 

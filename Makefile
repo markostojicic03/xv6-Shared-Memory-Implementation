@@ -195,7 +195,10 @@ UPROGS=\
 	$U/_usertests\
 	$U/_wc\
 	$U/_zombie\
-	#$U/_shmtest\
+	$U/_shmtest\
+	$U/_setmsg\
+	$U/_getmsg\
+	$U/_holdmsg\
 
 fs.img: $T/mkfs README $(UPROGS)
 	$T/mkfs fs.img README $(UPROGS)

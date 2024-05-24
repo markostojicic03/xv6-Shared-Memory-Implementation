@@ -6,6 +6,13 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "syscall.h"
+#include "kernel/fcntl.h"
+#include "stddef.h"
+
+extern int shm_close();
+extern int shm_map();
+
 
 struct {
 	struct spinlock lock;
@@ -51,6 +58,25 @@ mycpu(void)
 			return &cpus[i];
 	}
 	panic("unknown apicid\n");
+}
+
+void defaultValue(struct proc *p){
+	for(int i = 0; i < 16;++i){
+		p->openShm[i] = NULL;
+		p->mapiraniShm[i] = 0;
+		
+	}
+	for(int i = 0; i < 32;++i){
+		p->vira[i] = 0;
+	}
+	p->shmCounter = 0;
+	p->mapCounter = 0;
+
+	p->tempId = 0;
+	p->tempPok = 0;
+	p->tempFlags = 0;
+	p->child = NULL;
+	p->fork = 0;
 }
 
 // Disable interrupts so that we are not rescheduled
@@ -113,8 +139,15 @@ found:
 	memset(p->context, 0, sizeof *p->context);
 	p->context->eip = (uint)forkret;
 
+	
+	defaultValue(p);
+
 	return p;
 }
+
+
+
+
 
 // Set up first user process.
 void
@@ -174,6 +207,7 @@ growproc(int n)
 	return 0;
 }
 
+
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
@@ -183,6 +217,7 @@ fork(void)
 	int i, pid;
 	struct proc *np;
 	struct proc *curproc = myproc();
+
 
 	// Allocate process.
 	if((np = allocproc()) == 0){
@@ -208,6 +243,34 @@ fork(void)
 			np->ofile[i] = filedup(curproc->ofile[i]);
 	np->cwd = idup(curproc->cwd);
 
+
+	np->shmCounter = 0;
+	np->mapCounter = 0;
+	for(i = 0; i < 16; i++){
+		if(curproc->openShm[i] != NULL){
+			struct shm *parShm = curproc->openShm[i];
+			np->openShm[i] = parShm;
+			for(int j = 0; j < 32;++j){
+				np->openShm[i]->stranice[j].phAdresa = parShm->stranice[j].phAdresa;
+				np->openShm[i]->stranice[j].popunjenaStranica = parShm->stranice[j].popunjenaStranica;
+			}
+
+			np->openShm[i]->ref = np->openShm[i]->ref + 1;
+			np->shmCounter = np->shmCounter + 1;
+		
+			curproc->fork = 1;
+			curproc->tempId = np->openShm[i]->id;
+			curproc->tempPok =  0;
+			curproc->tempFlags = curproc->flagPoseban;
+			curproc->child = np;
+			int rez = shm_map();
+			curproc->child = NULL;
+			curproc->fork = 0;
+			curproc->tempId = 0;
+			curproc->tempPok = 0;
+			curproc->tempFlags = 0;
+		}
+	}
 	safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
 	pid = np->pid;
@@ -239,6 +302,13 @@ exit(void)
 		if(curproc->ofile[fd]){
 			fileclose(curproc->ofile[fd]);
 			curproc->ofile[fd] = 0;
+		}
+	}
+	for(int i = 0; i < 16;i++){
+		if(curproc->openShm[i] != NULL){
+			int shm_id = curproc->openShm[i]->id;  
+			curproc->tempId = shm_id;
+			shm_close();
 		}
 	}
 

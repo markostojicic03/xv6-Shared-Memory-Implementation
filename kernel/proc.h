@@ -2,11 +2,15 @@ typedef struct shm{
 	char name[16];
 	int sizeShm;
 	struct shmStranica{
-		char *adresa;
+		char *phAdresa;
+		int popunjenaStranica;
 	}stranice[32];
+	int ref;
+	int id;
+	
 }shm;
-extern struct shm *shmObj[65];
-extern int nshmObj;
+extern  struct shm *shmObj[65];
+extern  int nshmObj;
 
 // Per-CPU state
 struct cpu {
@@ -41,6 +45,7 @@ struct context {
 	uint eip;
 };
 
+
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -58,8 +63,21 @@ struct proc {
 	struct file *ofile[NOFILE];  // Open files
 	struct inode *cwd;           // Current directory
 	char name[16];               // Process name (debugging)
-	struct shm *openShm[17];
+	struct shm *openShm[16];
 	int shmCounter;
+	int mapiraniShm[16];
+	int mapCounter;
+	void *vira[32];
+
+
+	
+
+	int flagPoseban;
+	int tempId;
+	void  **tempPok;
+	int tempFlags;
+	int fork;
+	struct proc *child;       
 };
 
 // Process memory is laid out contiguously, low addresses first:
